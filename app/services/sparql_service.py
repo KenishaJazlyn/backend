@@ -1,0 +1,124 @@
+# sparql_service.py
+import requests
+from urllib.parse import urlencode
+import time
+
+WIKIDATA_ENDPOINT = "https://query.wikidata.org/sparql"
+HEADERS = {
+    "User-Agent": "KG-Enrichment/1.0 (student project)",
+    "Accept": "application/sparql-results+json"
+}
+
+def run_sparql(endpoint, query, timeout=30, retries=3, backoff=1.0):
+    params = {"query": query}
+    url = endpoint + "?" + urlencode(params)
+    for attempt in range(retries):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.HTTPError as e:
+            if resp.status_code in (429, 503):
+                # rate-limited — backoff and retry
+                time.sleep(backoff * (2 ** attempt))
+                continue
+            raise
+        except requests.exceptions.RequestException:
+            time.sleep(backoff * (2 ** attempt))
+    raise RuntimeError("SPARQL query failed after retries")
+
+def find_qid_by_label(name, limit=5):
+    q = '''
+    SELECT ?person WHERE {
+      ?person rdfs:label "%s"@en .
+    } LIMIT %d
+    ''' % (name.replace('"','\\"'), limit)
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    results = data.get('results', {}).get('bindings', [])
+    qids = [r['person']['value'].split('/')[-1] for r in results]
+    return qids
+
+def get_person_basic_by_qid(qid):
+    q = '''
+    SELECT ?description ?image WHERE {
+      BIND(wd:%s AS ?person)
+      OPTIONAL { ?person schema:description ?description FILTER(LANG(?description)='en') }
+      OPTIONAL { ?person wdt:P18 ?image. }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    if not rows:
+        return None
+    row = rows[0]
+    return {
+        "qid": qid,
+        "description": row.get("description", {}).get("value"),
+        "image": row.get("image", {}).get("value")
+    }
+
+def get_person_positions(qid):
+    q = '''
+    SELECT ?positionLabel ?start ?end WHERE {
+      BIND(wd:%s AS ?person)
+      ?person p:P39 ?stmt .
+      ?stmt ps:P39 ?position .
+      OPTIONAL { ?stmt pq:P580 ?start. }
+      OPTIONAL { ?stmt pq:P582 ?end. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    out = []
+    for r in rows:
+        out.append({
+            "position_label": r.get("positionLabel", {}).get("value"),
+            "start": r.get("start", {}).get("value"),
+            "end": r.get("end", {}).get("value")
+        })
+    return out
+
+def get_person_dynasty(qid):
+    q = '''
+    SELECT ?dynastyLabel WHERE {
+      BIND(wd:%s AS ?person)
+      OPTIONAL { ?person wdt:P53 ?dynasty. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    dyns = [r['dynastyLabel']['value'] for r in rows if 'dynastyLabel' in r]
+    return dyns
+
+def get_person_cause_and_killer(qid):
+    q = '''
+    SELECT ?causeLabel ?killerLabel WHERE {
+      BIND(wd:%s AS ?person)
+      OPTIONAL { ?person wdt:P509 ?cause. }
+      OPTIONAL { ?person wdt:P119 ?killer. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    out = {"cause": None, "killer": None}
+    if rows:
+        r = rows[0]
+        if 'causeLabel' in r: out['cause'] = r['causeLabel']['value']
+        if 'killerLabel' in r: out['killer'] = r['killerLabel']['value']
+    return out
+
+def get_person_events(qid):
+    q = '''
+    SELECT ?eventLabel WHERE {
+      BIND(wd:%s AS ?person)
+      OPTIONAL { ?person wdt:P1344 ?event. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    events = [r['eventLabel']['value'] for r in rows if 'eventLabel' in r]
+    return events
