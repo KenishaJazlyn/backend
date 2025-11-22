@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from app.services.enrich_service import enrich_person_by_name
+from app.services.enrich_service import enrich_all_events, enrich_person_by_name, enrich_event_by_name
 from app.db.neo4j_repo import get_repo
 import time
 
@@ -12,7 +12,14 @@ class EnrichName(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status":"ok"}
+    try:
+        repo = get_repo()
+        # Simple connectivity test
+        with repo.driver.session(database=repo.db) as session:
+            session.run("RETURN 1")
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        return {"status": "error", "database": "disconnected", "error": str(e)}
 
 @app.post("/enrich/person")
 def enrich_person(payload: EnrichName):
@@ -46,4 +53,9 @@ def enrich_batch(offset: int = 0, limit: int = 100):
         except Exception as e:
             results.append({name: {"status":"error", "error": str(e)}})
         time.sleep(0.5)
+    return {"done": len(results), "results": results}
+
+@app.post("/enrich/event")
+def enrich_event():
+    results = enrich_all_events()
     return {"done": len(results), "results": results}

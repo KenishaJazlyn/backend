@@ -133,3 +133,36 @@ def get_person_events(qid):
     rows = data.get('results', {}).get('bindings', [])
     events = [r['eventLabel']['value'] for r in rows if 'eventLabel' in r]
     return events
+
+
+# event enrichment
+def get_event_qid_by_name(name, limit=1):
+    q = '''
+    SELECT ?event WHERE {
+      ?event rdfs:label "%s"@en .
+    } LIMIT %d
+    ''' % (name.replace('"','\\"'), limit)
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    results = data.get('results', {}).get('bindings', [])
+    qids = [r['event']['value'].split('/')[-1] for r in results]
+    return qids
+
+def get_event_basic_by_qid(qid):
+    q = '''
+    SELECT ?description ?image WHERE {
+      BIND(wd:%s AS ?event)
+      OPTIONAL { ?event schema:description ?description FILTER(LANG(?description)='en') }
+      OPTIONAL { ?event wdt:P18 ?image. }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    if not rows:
+        return None
+
+    row = rows[0]
+    return {
+        "qid": qid,
+        "description": row.get("description", {}).get("value"),
+        "image": row.get("image", {}).get("value")
+    }

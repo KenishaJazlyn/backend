@@ -128,5 +128,42 @@ class Neo4jRepo:
                         MERGE (p)-[:PARTICIPATED_IN]->(ev)
                     """, {"person_id": person_id, "event": e})
 
+    # -------------------------
+    # GET ALL EVENTS
+    # -------------------------
+    def get_all_events(self, limit=1000):
+        with self.driver.session(database=self.db) as session:
+            res = session.run("""
+                MATCH (e:Event)
+                RETURN e.name AS name, e.event_id AS event_id
+                LIMIT $limit
+            """, {"limit": limit})
+            return [dict(r) for r in res]
+        
+    # -------------------------
+    # UPSERT EVENT ENRICHED DATA
+    # -------------------------
+    def upsert_event_enrichment(
+        self,
+        event_id,
+        qid,
+        description=None,
+        image=None
+    ):
+        with self.driver.session(database=self.db) as session:
+
+            # Update basic attributes
+            session.run("""
+                MATCH (e:Event {event_id: $event_id})
+                SET e.wikidata_qid = $qid,
+                    e.description = $description,
+                    e.image_url = $image
+            """, {
+                "event_id": event_id,
+                "qid": qid,
+                "description": description,
+                "image": image
+            })
+
 def get_repo():
     return Neo4jRepo(driver)
