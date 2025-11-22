@@ -170,9 +170,16 @@ def get_event_basic_by_qid(qid):
 
 def get_event_optional_enrichment(qid):
     q = '''
+    PREFIX wd: <http://www.wikidata.org/entity/>
+    PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+    PREFIX schema: <http://schema.org/>
+
     SELECT 
         ?description ?image ?startDate ?endDate ?coordinates 
-        ?primaryCategory ?location ?deaths ?cause ?effect ?instanceOf ?video
+        ?primaryCategory ?location ?deaths ?cause ?effect ?video
+        ?participant ?partOf ?pointInTime ?describedBySource ?describedAtURL
+        ?commonsCategory ?mainCategory ?detailMap ?pageBanner
+        ?focusList ?hasPart
     WHERE 
     {
         BIND(wd:%s AS ?event)
@@ -180,14 +187,30 @@ def get_event_optional_enrichment(qid):
         OPTIONAL { ?event wdt:P18 ?image. }
         OPTIONAL { ?event wdt:P580 ?startDate. } 
         OPTIONAL { ?event wdt:P582 ?endDate. } 
-        OPTIONAL { ?event wdt:P625 ?coordinates. } 
-        OPTIONAL { ?event wdt:P31 ?primaryCategory. }
-        OPTIONAL { ?event wdt:P276 ?location. }
+        OPTIONAL { ?event wdt:P625 ?coordinates. }
+        
+        # QID/Multi-Value Properties
+        OPTIONAL { ?event wdt:P31 ?primaryCategory. }       # Instance of
+        OPTIONAL { ?event wdt:P276 ?location. }            # Location
+        OPTIONAL { ?event wdt:P828 ?cause. }               # Main Cause (Has Cause)
+        OPTIONAL { ?event wdt:P1542 ?effect. }             # Cause Of (Has Effect)
+        OPTIONAL { ?event wdt:P710 ?participant. }          
+        OPTIONAL { ?event wdt:P361 ?partOf. }               # Part of (Already exists, but adding P-ID clarity)
+        OPTIONAL { ?event wdt:P301 ?mainCategory. }
+        OPTIONAL { ?event wdt:P1343 ?describedBySource. }
+        
+        # --- NEW PROPERTIES ---
+        OPTIONAL { ?event wdt:P1013 ?focusList. }           # Focus list of Wikimedia project
+        OPTIONAL { ?event wdt:P527 ?hasPart. }              # Has part(s)
+        
+        # Literal/URL Properties
         OPTIONAL { ?event wdt:P1120 ?deaths. }
-        OPTIONAL { ?event wdt:P828 ?cause. }
-        OPTIONAL { ?event wdt:P1542 ?effect. }
-        OPTIONAL { ?event wdt:P31 ?instanceOf. }
+        OPTIONAL { ?event wdt:P585 ?pointInTime. }
+        OPTIONAL { ?event wdt:P373 ?commonsCategory. }
+        OPTIONAL { ?event wdt:P948 ?pageBanner. }
+        OPTIONAL { ?event wdt:P951 ?detailMap. }
         OPTIONAL { ?event wdt:P1047 ?video. }
+        OPTIONAL { ?event wdt:P973 ?describedAtURL. }
     }
     ''' % qid
     
@@ -195,7 +218,8 @@ def get_event_optional_enrichment(qid):
     rows = data.get('results', {}).get('bindings', [])
     if not rows:
         return None
-    
+
+    # Use 'set' for all multi-value QID/URL properties
     result = {
         "qid": qid,
         "description": None,
@@ -203,39 +227,73 @@ def get_event_optional_enrichment(qid):
         "start_date": None,
         "end_date": None,
         "coordinates": None,
-        "primary_category": set(),
-        "location": set(),
-        "cause": set(),
-        "effect": set(),
-        "instance_of": set(),
-        "video": set(),
         "deaths": None,
+        
+        # Single Literal/URL/Date Properties
+        "point_in_time": None,
+        "commons_category": None,
+        "page_banner": None,
+        "detail_map": None,
+        
+        # Multi-Value QID/URL Properties (Initialized as sets)
+        "primary_category_qids": set(), 
+        "location_qids": set(),         
+        "cause_qids": set(),            
+        "effect_qids": set(),           
+        "video_urls": set(),            
+        "participant_qids": set(),      
+        "part_of_qids": set(),          
+        "described_by_source_qids": set(), 
+        "described_at_url": set(),
+        "main_category_qids": set(),
+        
+        # --- NEW PROPERTIES ---
+        "focus_list_qids": set(),       # P1013
+        "has_part_qids": set(),         # P527
+    }
+    
+    # Define a mapping for multi-value fields to their Python dictionary keys
+    multi_value_map = {
+        "primaryCategory": "primary_category_qids",
+        "location": "location_qids",
+        "cause": "cause_qids",
+        "effect": "effect_qids",
+        "video": "video_urls",
+        "participant": "participant_qids",
+        "partOf": "part_of_qids",
+        "describedBySource": "described_by_source_qids",
+        "describedAtURL": "described_at_url",
+        "mainCategory": "main_category_qids",
+        # --- NEW MAPPINGS ---
+        "focusList": "focus_list_qids",
+        "hasPart": "has_part_qids",
     }
 
     for row in rows:
-        if result["description"] is None: result["description"] = row.get("description", {}).get("value")
-        if result["image"] is None: result["image"] = row.get("image", {}).get("value")
-        if result["start_date"] is None: result["start_date"] = row.get("startDate", {}).get("value")
-        if result["end_date"] is None: result["end_date"] = row.get("endDate", {}).get("value")
-        if result["coordinates"] is None: result["coordinates"] = row.get("coordinates", {}).get("value")
-        if result["deaths"] is None: result["deaths"] = row.get("deaths", {}).get("value")
-        if row.get("primaryCategory"): result["primary_category"].add(row["primaryCategory"]["value"])
-        if row.get("location"): result["location"].add(row["location"]["value"])
-        if row.get("cause"): result["cause"].add(row["cause"]["value"])
-        if row.get("effect"): result["effect"].add(row["effect"]["value"])
-        if row.get("instanceOf"): result["instance_of"].add(row["instanceOf"]["value"])
-        if row.get("video"): result["video"].add(row["video"]["value"])
+        # Single-Value Literals (Take the first one found)
+        # Using concise check: assign if value is None AND row has the key
+        if result["description"] is None and row.get("description"): result["description"] = row["description"]["value"]
+        if result["image"] is None and row.get("image"): result["image"] = row["image"]["value"]
+        if result["start_date"] is None and row.get("startDate"): result["start_date"] = row["startDate"]["value"]
+        if result["end_date"] is None and row.get("endDate"): result["end_date"] = row["endDate"]["value"]
+        if result["coordinates"] is None and row.get("coordinates"): result["coordinates"] = row["coordinates"]["value"]
+        if result["deaths"] is None and row.get("deaths"): result["deaths"] = row["deaths"]["value"]
+        if result["point_in_time"] is None and row.get("pointInTime"): result["point_in_time"] = row["pointInTime"]["value"]
+        if result["commons_category"] is None and row.get("commonsCategory"): result["commons_category"] = row["commonsCategory"]["value"]
+        if result["page_banner"] is None and row.get("pageBanner"): result["page_banner"] = row["pageBanner"]["value"]
+        if result["detail_map"] is None and row.get("detailMap"): result["detail_map"] = row["detailMap"]["value"]
 
-    for key in ["primary_category", "location", "cause", "effect", "instance_of", "video"]:
-        if result[key]:
-            result[key] = list(result[key])
-        else:
-            result[key] = None 
+        # Multi-Value Fields (Collect all unique values into sets)
+        for sparql_key, result_key in multi_value_map.items():
+            if row.get(sparql_key):
+                result[result_key].add(row[sparql_key]["value"])
 
-    if result["primary_category"] or result["instance_of"]:
-        all_categories = set((result["primary_category"] or []) + (result["instance_of"] or []))
-        result["primary_category"] = list(all_categories)
-        
-    del result["instance_of"]
+    # Convert all sets to lists (or None if the set is empty)
+    for key in list(result.keys()):
+        if isinstance(result[key], set):
+            if result[key]:
+                result[key] = list(result[key])
+            else:
+                result[key] = None
     
     return result

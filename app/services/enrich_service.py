@@ -166,20 +166,39 @@ def enrich_events_with_optional_properties():
             continue
         
         try:
+            # Panggilan fungsi upsert_event_enrichment_optional yang diperbarui
             repo.upsert_event_enrichment_optional(
                 event_id=event_id,
                 qid=qid,
+                
+                # --- PROPERTI DASAR ---
                 description=enriched_data.get("description"),
                 image=enriched_data.get("image"),
                 start_date=enriched_data.get("start_date"),
                 end_date=enriched_data.get("end_date"),
                 coordinates=enriched_data.get("coordinates"),
+                
+                # --- PROPERTI BARU TUNGGAL/LITERAL ---
                 deaths=enriched_data.get("deaths"),
-                video=enriched_data.get("video"),
-                primary_category=enriched_data.get("primary_category"), 
-                location=enriched_data.get("location"),
-                cause=enriched_data.get("cause"),
-                effect=enriched_data.get("effect"),
+                point_in_time=enriched_data.get("point_in_time"),
+                commons_category=enriched_data.get("commons_category"),
+                page_banner=enriched_data.get("page_banner"),
+                detail_map=enriched_data.get("detail_map"),
+                
+                # --- PROPERTI MULTI-NILAI (LIST QID/URL) ---
+                primary_category_qids=enriched_data.get("primary_category_qids"), 
+                location_qids=enriched_data.get("location_qids"),
+                cause_qids=enriched_data.get("cause_qids"),
+                effect_qids=enriched_data.get("effect_qids"),
+                video_urls=enriched_data.get("video_urls"),
+                participant_qids=enriched_data.get("participant_qids"),
+                part_of_qids=enriched_data.get("part_of_qids"),
+                described_by_source_qids=enriched_data.get("described_by_source_qids"),
+                described_at_url=enriched_data.get("described_at_url"),
+                main_category_qids=enriched_data.get("main_category_qids"),
+                focus_list_qids=enriched_data.get("focus_list_qids"),
+                has_part_qids=enriched_data.get("has_part_qids"),
+
             )
             results.append({"event_id": event_id, "name": name, "qid": qid, "status": "ok"})
         except Exception as e:
