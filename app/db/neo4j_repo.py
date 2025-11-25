@@ -5,16 +5,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-NEO4J_URI = os.getenv("NEO4J_URI")                     # e.g. neo4j+s://xxxx.databases.neo4j.io
+NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USERNAME")
 NEO4J_PASS = os.getenv("NEO4J_PASSWORD")
-NEO4J_DB   = os.getenv("NEO4J_DATABASE", "neo4j")      # default aura db = "neo4j"
+NEO4J_DB   = os.getenv("NEO4J_DATABASE", "neo4j")
 
-# Optional (tidak wajib, tapi boleh)
 AURA_INSTANCEID = os.getenv("AURA_INSTANCEID")
 AURA_INSTANCENAME = os.getenv("AURA_INSTANCENAME")
 
-# Create Aura driver
 driver = GraphDatabase.driver(
     NEO4J_URI,
     auth=(NEO4J_USER, NEO4J_PASS)
@@ -23,14 +21,11 @@ driver = GraphDatabase.driver(
 class Neo4jRepo:
     def __init__(self, driver):
         self.driver = driver
-        self.db = NEO4J_DB     # simpan nama database
+        self.db = NEO4J_DB
 
     def close(self):
         self.driver.close()
 
-    # -------------------------
-    # GET ALL PERSONS
-    # -------------------------
     def get_all_persons(self, limit=1000):
         with self.driver.session(database=self.db) as session:
             res = session.run("""
@@ -40,9 +35,6 @@ class Neo4jRepo:
             """, {"limit": limit})
             return [dict(r) for r in res]
 
-    # -------------------------
-    # FIND PERSON BY NAME
-    # -------------------------
     def find_person_by_name(self, name):
         with self.driver.session(database=self.db) as session:
             res = session.run("""
@@ -52,81 +44,131 @@ class Neo4jRepo:
             row = res.single()
             return row["p"] if row else None
 
-    # -------------------------
-    # UPSERT ENRICHED DATA
-    # -------------------------
     def upsert_person_enrichment(
         self,
         person_id,
         qid,
         description=None,
         image=None,
+        death_date=None,
+        death_place=None,
         cause=None,
         killer=None,
         reigns=None,
         dynasties=None,
-        events=None
+        events=None,
+        conflicts=None,
+        awards=None,
+        works=None,
+        alliances=None,
+        ranks=None,
+        orders=None,
+        crimes=None
     ):
+        reigns = reigns or []
+        dynasties = dynasties or []
+        events = events or []
+        conflicts = conflicts or []
+        awards = awards or []
+        works = works or []
+        alliances = alliances or []
+        ranks = ranks or []
+        orders = orders or []
+        crimes = crimes or []
+
         with self.driver.session(database=self.db) as session:
 
-            # Update basic attributes
+            # Update basic person attributes
             session.run("""
                 MATCH (p:Person {article_id: $person_id})
                 SET p.wikidata_qid = $qid,
-                    p.abstract = $description,
+                    p.description = $description,
                     p.image_url = $image,
+                    p.death_date = $death_date,
+                    p.death_place = $death_place,
                     p.cause_of_death = $cause
             """, {
                 "person_id": person_id,
                 "qid": qid,
                 "description": description,
                 "image": image,
+                "death_date": death_date,
+                "death_place": death_place,
                 "cause": cause
             })
 
-            # Killer relation
+            # Killer relationship
             if killer:
                 session.run("""
                     MATCH (victim:Person {article_id: $person_id})
-                    MERGE (killer:Person {name: $killer})
-                    MERGE (victim)-[:KILLED_BY]->(killer)
+                    MERGE (k:Person {full_name: $killer})
+                    MERGE (victim)-[:KILLED_BY]->(k)
                 """, {"person_id": person_id, "killer": killer})
 
+   # ...existing code...
             # Positions (P39)
             if reigns:
-                for r in reigns:
-                    session.run("""
-                        MATCH (p:Person {article_id: $person_id})
-                        MERGE (pos:Position {name: $positionName})
-                        MERGE (p)-[rel:HELD_POSITION]->(pos)
-                        SET rel.start = $start,
-                            rel.end = $end
-                    """, {
-                        "person_id": person_id,
-                        "positionName": r.get("position_label") or "Unknown Position",
-                        "start": r.get("start"),
-                        "end": r.get("end")
-                    })
+                session.run("""
+                    MATCH (p:Person {article_id:$person_id})
+                    UNWIND $reigns AS pos
+                    WITH p, pos
+                    WHERE pos.position_label IS NOT NULL
+                    MERGE (posNode:Position {label: pos.position_label})
+                    MERGE (p)-[r:HELD_POSITION]->(posNode)
+                    SET r.start = pos.start, r.end = pos.end
+                """, {"person_id": person_id, "reigns": reigns})
 
-            # Dynasties
-            if dynasties:
-                for d in dynasties:
-                    if d and d.strip():  # pastikan tidak kosong
-                        session.run("""
-                            MATCH (p:Person {article_id: $person_id})
-                            MERGE (dyn:Dynasty {name: $dynasty})
-                            MERGE (p)-[:MEMBER_OF_DYNASTY]->(dyn)
-                        """, {"person_id": person_id, "dynasty": d.strip()})
-                        print(f"Created MEMBER_OF_DYNASTY relationship to: {d}")
+            # Conflicts
+            if conflicts:
+                session.run("""
+                    MATCH (p:Person {article_id:$person_id})
+                    UNWIND $conflicts AS c
+                    WITH p, c
+                    WHERE c.conflict IS NOT NULL
+                    MERGE (conf:Conflict {name: c.conflict})
+                    MERGE (p)-[r:PARTICIPATED_IN_CONFLICT]->(conf)
+                    SET r.start = c.start, r.end = c.end
+                """, {"person_id": person_id, "conflicts": conflicts})
 
-            # Event participation
-            if events:
-                for e in events:
-                    session.run("""
-                        MATCH (p:Person {article_id: $person_id})
-                        MERGE (ev:Event {name: $event})
-                        MERGE (p)-[:PARTICIPATED_IN]->(ev)
-                    """, {"person_id": person_id, "event": e})
+            # Awards
+            if awards:
+                session.run("""
+                    MATCH (p:Person {article_id:$person_id})
+                    UNWIND $awards AS a
+                    WITH p, a
+                    WHERE a.award IS NOT NULL
+                    MERGE (aw:Award {name: a.award})
+                    MERGE (p)-[r:RECEIVED_AWARD]->(aw)
+                    SET r.year = a.year
+                """, {"person_id": person_id, "awards": awards})
+
+            # Notable Works
+            if works:
+                session.run("""
+                    MATCH (p:Person {article_id:$person_id})
+                    UNWIND $works AS w
+                    WITH p, w
+                    WHERE w.work IS NOT NULL
+                    MERGE (wk:Work {title: w.work})
+                    SET wk.year = w.year
+                    WITH p, wk, w
+                    MERGE (p)-[r:CREATED_WORK]->(wk)
+                    SET r.year = w.year
+                """, {"person_id": person_id, "works": works})
+
+            # Political Alliances / Parties
+            if alliances:
+                session.run("""
+                    MATCH (p:Person {article_id:$person_id})
+                    UNWIND $alliances AS al
+                    WITH p, al
+                    WHERE al.party IS NOT NULL
+                    MERGE (pa:Party {name: al.party})
+                    MERGE (p)-[r:MEMBER_OF]->(pa)
+                    SET r.start = al.start, r.end = al.end
+                """, {"person_id": person_id, "alliances": alliances})
+# ...existing code...
+
 
     # -------------------------
     # GET ALL EVENTS

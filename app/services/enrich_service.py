@@ -1,17 +1,77 @@
 from app.services.sparql_service import (
-    find_qid_by_label,
-    get_person_basic_by_qid,
-    get_person_positions,
-    get_person_dynasty,
-    get_person_cause_and_killer,
-    get_person_events,
-    get_event_qid_by_name,
-    get_event_basic_by_qid,
+    find_qid_by_label, get_person_basic_by_qid, get_person_positions, 
+    get_person_dynasty, get_person_cause_and_killer, get_person_events,
+    get_person_death_info, get_person_conflicts, get_person_awards,
+    get_person_notable_works, get_person_alliances, get_person_military_rank,
+    get_person_religious_orders, get_person_convicted_of
 )
 from app.db.neo4j_repo import get_repo
 
 repo = get_repo()
 
+def preview_person_enrichment(name):
+    """
+    Preview enrichment FOR A SINGLE QID (use qids[0] only).
+    Does NOT write to the DB.
+    """
+    # Step A: find person in internal Neo4j
+    persons = repo.get_all_persons(limit=10000)
+    match = None
+    for p in persons:
+        internal_name = p.get('full_name')
+        if internal_name and internal_name.lower() == name.lower():
+            match = p
+            break
+
+    if not match:
+        return {"status":"not_found", "name": name}
+
+    person_id = match.get('article_id')
+    if person_id is None:
+        return {"status":"error", "name": name, "message": "article_id is None"}
+
+    # Step B: get single QID via label search (take qids[0])
+    qids = find_qid_by_label(name, limit=1)
+    if not qids:
+        return {"status":"qid_not_found", "name": name}
+    qid = qids[0]
+    basic = get_person_basic_by_qid(qid)
+    # Step C: fetch enrichment for that single QID
+    positions = get_person_positions(qid)
+    dynasties = get_person_dynasty(qid)
+    cod = get_person_cause_and_killer(qid)
+    events = get_person_events(qid)
+    death_info = get_person_death_info(qid)
+    conflicts = get_person_conflicts(qid)
+    awards = get_person_awards(qid)
+    works = get_person_notable_works(qid)
+    alliances = get_person_alliances(qid)
+    ranks = get_person_military_rank(qid)
+    orders = get_person_religious_orders(qid)
+    crimes = get_person_convicted_of(qid)
+            
+
+    candidate = {
+        "qid": qid,
+        "wikidata_url": f"https://www.wikidata.org/wiki/{qid}",
+        "description": basic.get('description') if basic else None,
+        "image": basic.get('image') if basic else None,
+        "positions": positions,
+        "dynasties": dynasties,
+        "cause_of_death": cod.get('cause'),
+        "killer": cod.get('killer'),
+        "events": events,
+        "death_info": death_info,
+        "conflicts": conflicts,
+        "awards": awards,
+        "notable_works": works,
+        "alliances": alliances,
+        "military_ranks": ranks,
+        "religious_orders": orders,
+        "convicted_of": crimes
+    }
+
+    return {"status":"ok", "name": name, "person_id": person_id, "candidate": candidate}
 
 def enrich_person_by_name(name):
     # Step A: find person in internal Neo4j
@@ -40,97 +100,41 @@ def enrich_person_by_name(name):
     if not qids:
         return {"status": "qid_not_found", "name": name}
 
-    qid = qids[0]  # naive: choose first; you can improve disambiguation
-
-    # Step C: fetch enrichment pieces
+    qid = qids[0]
     basic = get_person_basic_by_qid(qid)
+    # Step C: fetch enrichment for that single QID
     positions = get_person_positions(qid)
     dynasties = get_person_dynasty(qid)
     cod = get_person_cause_and_killer(qid)
     events = get_person_events(qid)
+    death_info = get_person_death_info(qid)
+    conflicts = get_person_conflicts(qid)
+    awards = get_person_awards(qid)
+    works = get_person_notable_works(qid)
+    alliances = get_person_alliances(qid)
+    ranks = get_person_military_rank(qid)
+    orders = get_person_religious_orders(qid)
+    crimes = get_person_convicted_of(qid)
 
     # Step D: persist to Neo4j
     repo.upsert_person_enrichment(
         person_id=person_id,
         qid=qid,
-        description=basic.get("description") if basic else None,
-        image=basic.get("image") if basic else None,
-        cause=cod.get("cause"),
-        killer=cod.get("killer"),
+        description=basic.get('description') if basic else None,
+        image=basic.get('image') if basic else None,
+        death_date=death_info.get('death_date'),
+        death_place=death_info.get('death_place'),
+        cause=cod.get('cause'),
+        killer=cod.get('killer'),
         reigns=positions,
         dynasties=dynasties,
         events=events,
+        conflicts=conflicts,
+        awards=awards,
+        works=works,
+        alliances=alliances,
+        ranks=ranks,
+        orders=orders,
+        crimes=crimes
     )
-
-    return {"status": "ok", "name": name, "qid": qid}
-
-
-# event enrichment
-def enrich_event_by_name(name):
-    # Step A: find event in internal Neo4j
-    events = repo.get_all_events(limit=10000)
-    match = None
-
-    for e in events:
-        internal_name = e.get("name")
-        if internal_name and internal_name.lower() == name.lower():
-            match = e
-            break
-
-    if not match:
-        return {"status": "not_found", "name": name}
-
-    event_id = match.get("event_id")
-
-    # Tambahkan validasi
-    if event_id is None:
-        return {"status": "error", "name": name, "message": "event_id is None"}
-
-    print(f"Found internal event: {internal_name} with event_id {event_id}")
-
-    # Step B: find QID in Wikidata
-    qid = get_event_qid_by_name(name)
-    if not qid:
-        return {"status": "qid_not_found", "name": name}
-
-    # Step C: fetch enrichment pieces
-    basic = get_event_basic_by_qid(qid)
-
-    # Step D: persist to Neo4j
-    repo.upsert_event_enrichment(
-        event_id=event_id,
-        qid=qid,
-        description=basic.get("description") if basic else None,
-        image=basic.get("image") if basic else None,
-    )
-
-    return {"status": "ok", "name": name, "qid": qid}
-
-
-def enrich_all_events():
-    events = repo.get_all_events(limit=10000)
-    results = []
-    for e in events:
-        name = e.get("name")
-        event_id = e.get("event_id")
-        if not name or not event_id:
-            results.append({"event_id": event_id, "status": "skip_no_name_or_id"})
-            continue
-
-        qids = get_event_qid_by_name(name)
-        qid = qids[0] if qids else None
-        if not qid:
-            results.append(
-                {"event_id": event_id, "name": name, "status": "qid_not_found"}
-            )
-            continue
-
-        basic = get_event_basic_by_qid(qid)
-        repo.upsert_event_enrichment(
-            event_id=event_id,
-            qid=qid,
-            description=basic.get("description") if basic else None,
-            image=basic.get("image") if basic else None,
-        )
-        results.append({"event_id": event_id, "name": name, "qid": qid, "status": "ok"})
-    return results
+    return {"status":"ok","name":name,"qid":qid}
