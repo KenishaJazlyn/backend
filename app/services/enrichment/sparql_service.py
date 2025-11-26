@@ -1,4 +1,3 @@
-# sparql_service.py
 import requests
 from urllib.parse import urlencode
 import time
@@ -19,7 +18,6 @@ def run_sparql(endpoint, query, timeout=30, retries=3, backoff=1.0):
             return resp.json()
         except requests.exceptions.HTTPError as e:
             if resp.status_code in (429, 503):
-                # rate-limited — backoff and retry
                 time.sleep(backoff * (2 ** attempt))
                 continue
             raise
@@ -97,18 +95,17 @@ def get_person_dynasty(qid):
     for r in rows:
         if 'dynastyLabel' in r:
             label = r['dynastyLabel']['value']
-            # Filter out QID responses
             if not label.startswith('Q'):
                 dyns.append(label)
-    print("Dynasties found:", dyns)
     return dyns
 
 def get_person_cause_and_killer(qid):
+    """FIXED: Use P157 for killer, not P119 (burial place)"""
     q = '''
     SELECT ?causeLabel ?killerLabel WHERE {
       BIND(wd:%s AS ?person)
       OPTIONAL { ?person wdt:P509 ?cause. }
-      OPTIONAL { ?person wdt:P119 ?killer. }
+      OPTIONAL { ?person wdt:P157 ?killer. }
       SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
     }
     ''' % qid
@@ -166,7 +163,157 @@ def get_event_basic_by_qid(qid):
         "description": row.get("description", {}).get("value"),
         "image": row.get("image", {}).get("value")
     }
+def get_person_death_info(qid):
+    """Get death date and place (P570, P20)"""
+    q = '''
+    SELECT ?deathDate ?deathPlaceLabel WHERE {
+      BIND(wd:%s AS ?person)
+      OPTIONAL { ?person wdt:P570 ?deathDate. }
+      OPTIONAL { ?person wdt:P20 ?deathPlace. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    if rows:
+        r = rows[0]
+        return {
+            "death_date": r.get("deathDate", {}).get("value"),
+            "death_place": r.get("deathPlaceLabel", {}).get("value")
+        }
+    return {}
 
+def get_person_conflicts(qid):
+    """Get military conflicts/wars participated in (P607)"""
+    q = '''
+    SELECT ?conflictLabel ?startTime ?endTime WHERE {
+      BIND(wd:%s AS ?person)
+      ?person wdt:P607 ?conflict.
+      OPTIONAL { ?conflict wdt:P580 ?startTime. }
+      OPTIONAL { ?conflict wdt:P582 ?endTime. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    conflicts = []
+    for r in rows:
+        if 'conflictLabel' in r:
+            conflicts.append({
+                "conflict": r['conflictLabel']['value'],
+                "start": r.get('startTime', {}).get('value'),
+                "end": r.get('endTime', {}).get('value')
+            })
+    return conflicts
+
+def get_person_awards(qid):
+    """Get awards and honors received (P166)"""
+    q = '''
+    SELECT ?awardLabel ?year WHERE {
+      BIND(wd:%s AS ?person)
+      ?person p:P166 ?stmt.
+      ?stmt ps:P166 ?award.
+      OPTIONAL { ?stmt pq:P585 ?year. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    awards = []
+    for r in rows:
+        if 'awardLabel' in r:
+            awards.append({
+                "award": r['awardLabel']['value'],
+                "year": r.get('year', {}).get('value')
+            })
+    return awards
+
+def get_person_notable_works(qid):
+    """Get notable works/publications (P800)"""
+    q = '''
+    SELECT ?workLabel ?year WHERE {
+      BIND(wd:%s AS ?person)
+      ?person wdt:P800 ?work.
+      OPTIONAL { ?work wdt:P577 ?year. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    works = []
+    for r in rows:
+        if 'workLabel' in r:
+            works.append({
+                "work": r['workLabel']['value'],
+                "year": r.get('year', {}).get('value')
+            })
+    return works
+
+def get_person_alliances(qid):
+    """Get political alliances or parties (P102)"""
+    q = '''
+    SELECT ?partyLabel ?startTime ?endTime WHERE {
+      BIND(wd:%s AS ?person)
+      ?person p:P102 ?stmt.
+      ?stmt ps:P102 ?party.
+      OPTIONAL { ?stmt pq:P580 ?startTime. }
+      OPTIONAL { ?stmt pq:P582 ?endTime. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    parties = []
+    for r in rows:
+        if 'partyLabel' in r:
+            parties.append({
+                "party": r['partyLabel']['value'],
+                "start": r.get('startTime', {}).get('value'),
+                "end": r.get('endTime', {}).get('value')
+            })
+    return parties
+
+def get_person_military_rank(qid):
+    """Get military ranks held (P410)"""
+    q = '''
+    SELECT ?rankLabel WHERE {
+      BIND(wd:%s AS ?person)
+      ?person wdt:P410 ?rank.
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    ranks = [r['rankLabel']['value'] for r in rows if 'rankLabel' in r]
+    return ranks
+
+def get_person_religious_orders(qid):
+    """Get religious orders (P611)"""
+    q = '''
+    SELECT ?orderLabel WHERE {
+      BIND(wd:%s AS ?person)
+      ?person wdt:P611 ?order.
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    orders = [r['orderLabel']['value'] for r in rows if 'orderLabel' in r]
+    return orders
+
+def get_person_convicted_of(qid):
+    """Get crimes convicted of (P1399)"""
+    q = '''
+    SELECT ?crimeLabel WHERE {
+      BIND(wd:%s AS ?person)
+      ?person wdt:P1399 ?crime.
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    ''' % qid
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    crimes = [r['crimeLabel']['value'] for r in rows if 'crimeLabel' in r]
+    return crimes
 
 def get_event_optional_enrichment(qid):
     q = '''
