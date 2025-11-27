@@ -253,7 +253,7 @@ def get_search_suggestions(q: str = Query(..., min_length=2)):
             LIMIT 5
             """
             
-            results = session.run(suggestions_cypher, {"query": q.lower()})
+            results = session.run(suggestions_cypher, {"query": q.lower().strip()})
             
             suggestions = []
             for record in results:
