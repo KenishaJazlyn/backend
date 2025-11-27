@@ -444,3 +444,27 @@ def get_event_optional_enrichment(qid):
                 result[key] = None
     
     return result
+
+def get_all_countries_continents():
+    """Get all countries and their continents from Wikidata"""
+    q = '''
+    SELECT ?country ?countryLabel ?continentLabel WHERE {
+      ?country wdt:P31/wdt:P279* wd:Q6256 .  # Instance of country
+      ?country wdt:P30 ?continent .           # Located in continent
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+    }
+    '''
+    
+    data = run_sparql(WIKIDATA_ENDPOINT, q)
+    rows = data.get('results', {}).get('bindings', [])
+    
+    result = {}
+    for row in rows:
+        country_name = row['countryLabel']['value']
+        continent_name = row['continentLabel']['value']
+        
+        # Skip if country name starts with 'Q' (unresolved labels)
+        if not country_name.startswith('Q') and not continent_name.startswith('Q'):
+            result[country_name] = continent_name
+            
+    return result
