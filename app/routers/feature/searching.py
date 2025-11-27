@@ -63,7 +63,7 @@ def search_historical_data(payload: SearchRequest):
             
             filter_conditions, base_params = _build_filter_conditions()
 
-            # PERSON SEARCH - With aggregated positions
+            # PERSON SEARCH - Fixed with proper aggregation for both positions and countries
             if payload.search_type in ["person", "all"]:
 
                 person_cypher = f"""
@@ -83,17 +83,18 @@ def search_historical_data(payload: SearchRequest):
                 if filter_conditions:
                     person_cypher += " AND (" + " AND ".join(filter_conditions) + ")"
                 
-                # Aggregate positions per person
+                # Aggregate BOTH positions AND countries per person
                 person_cypher += """
-                WITH p, country, 
-                     collect(DISTINCT coalesce(pos.label, pos.name)) as all_positions
+                WITH p, 
+                     collect(DISTINCT coalesce(pos.label, pos.name)) as all_positions,
+                     collect(DISTINCT country.country) as all_countries
                 RETURN 
                     id(p) AS id,
                     p.full_name AS name,
                     p.description AS description,
                     p.image_url AS image,
                     all_positions,
-                    country.country AS country
+                    all_countries[0] AS country  // Take first country only
                 ORDER BY p.full_name
                 SKIP $offset
                 LIMIT $limit
@@ -118,7 +119,7 @@ def search_historical_data(payload: SearchRequest):
                         "image": record["image"],
                         "context": {
                             "positions": positions,  # Array of all positions
-                            "country": record["country"]
+                            "country": record["country"]  # Single country (first one)
                         }
                     })
             
@@ -127,13 +128,13 @@ def search_historical_data(payload: SearchRequest):
 
             event_limit = payload.limit - person_found
 
-            # EVENT SEARCH - Same approach for events
+            # EVENT SEARCH - Fixed with same approach
             if (event_limit > 0) and (payload.search_type in ["event", "all"]):
                 
                 event_cypher = f"""
                 MATCH (e:Event)
                 OPTIONAL MATCH (e)-[:HELD_IN]->(country:Country)-[:LOCATED_IN]->(continent:Continent)
-                WITH DISTINCT e, country, continent
+                WITH e, country, continent
                 WHERE (
                     (e.name IS NOT NULL AND toLower(e.name) CONTAINS $query) OR
                     (e.description IS NOT NULL AND toLower(e.description) CONTAINS $query) OR
@@ -145,14 +146,17 @@ def search_historical_data(payload: SearchRequest):
                 if filter_conditions:
                     event_cypher += " AND (" + " AND ".join(filter_conditions) + ")"
                 
+                # Aggregate countries per event
                 event_cypher += """
+                WITH e,
+                     collect(DISTINCT country.country) as all_countries
                 RETURN 
                     id(e) AS id,
                     e.name AS name,
                     e.description AS description, 
                     e.image_url AS image,
                     e.impact AS impact,
-                    country.country AS country
+                    all_countries[0] AS country  // Take first country only
                 ORDER BY e.name
                 SKIP $offset
                 LIMIT $limit
