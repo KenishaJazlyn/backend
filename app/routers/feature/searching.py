@@ -47,13 +47,13 @@ def search_historical_data(payload: SearchRequest):
         # Country filter - support multiple countries
         if payload.filter_country and len(payload.filter_country) > 0:
             country_list = [c.lower() for c in payload.filter_country]
-            filter_conditions.append("toLower(country.country) IN $filter_countries")
+            filter_conditions.append("(country IS NOT NULL AND toLower(country.country) IN $filter_countries)")
             params["filter_countries"] = country_list
         
         # Continent filter - support multiple continents  
         if payload.filter_continent and len(payload.filter_continent) > 0:
             continent_list = [c.lower() for c in payload.filter_continent]
-            filter_conditions.append("toLower(continent.continent) IN $filter_continents")
+            filter_conditions.append("(continent IS NOT NULL AND toLower(continent.continent) IN $filter_continents)")
             params["filter_continents"] = continent_list
             
         return filter_conditions, params
@@ -63,31 +63,28 @@ def search_historical_data(payload: SearchRequest):
             
             filter_conditions, base_params = _build_filter_conditions()
 
-            # PERSON SEARCH - Multi-field search
+            # PERSON SEARCH - Fixed with proper OPTIONAL MATCH handling
             if payload.search_type in ["person", "all"]:
 
-                # Build main search conditions (always these, no country/continent search here)
-                search_conditions = [
-                    "toLower(p.full_name) CONTAINS $query",
-                    "toLower(p.description) CONTAINS $query", 
-                    "toLower(pos.label) CONTAINS $query",
-                    "toLower(pos.name) CONTAINS $query"
-                ]
-                
-                # Build WHERE statement
-                where_statement = "WHERE (" + " OR ".join(search_conditions) + ")"
-                
-                # Add filter conditions with AND logic (separate from search conditions)
-                if filter_conditions:
-                    filter_where = " AND (" + " AND ".join(filter_conditions) + ")"
-                    where_statement += filter_where
-
+                # Approach: Use WHERE after WITH to avoid OPTIONAL MATCH issues
                 person_cypher = f"""
                 MATCH (p:Person)
                 OPTIONAL MATCH (p)-[:HELD_POSITION]->(pos:Position)  
                 OPTIONAL MATCH (p)-[:BORN_IN]->(c:City)-[:LOCATED_IN]->(country:Country)-[:LOCATED_IN]->(continent:Continent)
-                { where_statement }
                 WITH DISTINCT p, pos, country, continent
+                WHERE (
+                    (p.full_name IS NOT NULL AND toLower(p.full_name) CONTAINS $query) OR
+                    (p.description IS NOT NULL AND toLower(p.description) CONTAINS $query) OR
+                    (pos IS NOT NULL AND pos.label IS NOT NULL AND toLower(pos.label) CONTAINS $query) OR
+                    (pos IS NOT NULL AND pos.name IS NOT NULL AND toLower(pos.name) CONTAINS $query)
+                )
+                """
+                
+                # Add filter conditions if any
+                if filter_conditions:
+                    person_cypher += " AND (" + " AND ".join(filter_conditions) + ")"
+                
+                person_cypher += """
                 RETURN 
                     id(p) AS id,
                     p.full_name AS name,
@@ -95,6 +92,7 @@ def search_historical_data(payload: SearchRequest):
                     p.image_url AS image,
                     coalesce(pos.label, pos.name) AS position,
                     country.country AS country
+                ORDER BY p.full_name
                 SKIP $offset
                 LIMIT $limit
                 """
@@ -125,29 +123,25 @@ def search_historical_data(payload: SearchRequest):
 
             event_limit = payload.limit - person_found
 
-            # EVENT SEARCH - Multi-field search  
+            # EVENT SEARCH - Same approach for events
             if (event_limit > 0) and (payload.search_type in ["event", "all"]):
                 
-                # Build main search conditions for events (no country/continent search here)
-                search_conditions = [
-                    "toLower(e.name) CONTAINS $query",
-                    "toLower(e.description) CONTAINS $query",
-                    "toLower(e.impact) CONTAINS $query"
-                ]
-                
-                # Build WHERE statement
-                where_statement = "WHERE (" + " OR ".join(search_conditions) + ")"
-                
-                # Add filter conditions with AND logic (separate from search conditions)
-                if filter_conditions:
-                    filter_where = " AND (" + " AND ".join(filter_conditions) + ")"
-                    where_statement += filter_where
-
                 event_cypher = f"""
                 MATCH (e:Event)
                 OPTIONAL MATCH (e)-[:HELD_IN]->(country:Country)-[:LOCATED_IN]->(continent:Continent)
-                { where_statement }
                 WITH DISTINCT e, country, continent
+                WHERE (
+                    (e.name IS NOT NULL AND toLower(e.name) CONTAINS $query) OR
+                    (e.description IS NOT NULL AND toLower(e.description) CONTAINS $query) OR
+                    (e.impact IS NOT NULL AND toLower(e.impact) CONTAINS $query)
+                )
+                """
+                
+                # Add filter conditions if any
+                if filter_conditions:
+                    event_cypher += " AND (" + " AND ".join(filter_conditions) + ")"
+                
+                event_cypher += """
                 RETURN 
                     id(e) AS id,
                     e.name AS name,
@@ -155,6 +149,7 @@ def search_historical_data(payload: SearchRequest):
                     e.image_url AS image,
                     e.impact AS impact,
                     country.country AS country
+                ORDER BY e.name
                 SKIP $offset
                 LIMIT $limit
                 """
@@ -188,6 +183,7 @@ def search_historical_data(payload: SearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
+# Keep other endpoints unchanged
 @router.get("/search/filters")
 def get_available_filters():
     """
@@ -201,26 +197,26 @@ def get_available_filters():
             # Get countries
             countries_cypher = """
             MATCH (c:Country)
+            WHERE c.country IS NOT NULL
             RETURN DISTINCT c.country AS name
             ORDER BY name
             """
             
             countries = []
             for record in session.run(countries_cypher):
-                if record["name"]:  # Skip null values
-                    countries.append(record["name"])
+                countries.append(record["name"])
             
             # Get continents  
             continents_cypher = """
             MATCH (cont:Continent)
+            WHERE cont.continent IS NOT NULL
             RETURN DISTINCT cont.continent AS name
             ORDER BY name
             """
             
             continents = []
             for record in session.run(continents_cypher):
-                if record["name"]:  # Skip null values
-                    continents.append(record["name"])
+                continents.append(record["name"])
             
             return {
                 "countries": countries,
@@ -241,14 +237,14 @@ def get_search_suggestions(q: str = Query(..., min_length=2)):
         with repo.driver.session(database=repo.db) as session:
             suggestions_cypher = """
             MATCH (p:Person)
-            WHERE toLower(p.full_name) STARTS WITH $query
+            WHERE p.full_name IS NOT NULL AND toLower(p.full_name) STARTS WITH $query
             RETURN p.full_name AS suggestion, "person" AS type
             LIMIT 5
             
             UNION
             
             MATCH (e:Event)
-            WHERE toLower(e.name) STARTS WITH $query
+            WHERE e.name IS NOT NULL AND toLower(e.name) STARTS WITH $query
             RETURN e.name AS suggestion, "event" AS type
             LIMIT 5
             """
