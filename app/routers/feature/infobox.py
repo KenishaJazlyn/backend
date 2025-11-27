@@ -31,30 +31,26 @@ def serialize_neo4j_types(obj):
     else:
         return obj
 
-@router.get("/infobox/{id}")
-def infobox_id(id):
+@router.get("/infobox/{element_id}")
+def infobox_id(element_id: str):
     """
-    Kembalikan properties dari node dengan id tertentu.
+    Kembalikan properties dari node dengan element id tertentu.
+    Element ID format: <database_id>:<uuid>:<sequence>
     """
-    # Validate id is a valid integer
-    try:
-        node_id = int(id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid id: {id}. Must be a valid integer.")
-    
-    if node_id < 0:
-        raise HTTPException(status_code=400, detail=f"Invalid id: {id}. Must be non-negative.")
+    # Validate element_id is not empty
+    if not element_id or not element_id.strip():
+        raise HTTPException(status_code=400, detail="Invalid element_id: cannot be empty.")
     
     repo = get_repo()
     try:
         with repo.driver.session(database=repo.db) as session:
-            result = session.run("MATCH (n) WHERE id(n) = $id RETURN n", id=node_id)
+            result = session.run("MATCH (n) WHERE elementId(n) = $element_id RETURN n", element_id=element_id)
             record = result.single()
             if not record:
-                raise HTTPException(status_code=404, detail=f"Node with id {id} not found")
+                raise HTTPException(status_code=404, detail=f"Node with element_id {element_id} not found")
             node = record["n"]
             properties = serialize_neo4j_types(dict(node))
-            return {"status": "ok", "id": id, "labels": list(node.labels), "properties": properties}
+            return {"status": "ok", "element_id": element_id, "labels": list(node.labels), "properties": properties}
     except HTTPException:
         raise
     except Exception as e:
