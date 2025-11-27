@@ -108,11 +108,7 @@ def search_historical_data(payload: SearchRequest):
                 person_results = session.run(person_cypher, person_params)
                 
                 for record in person_results:
-                    # Clean up positions - remove null values and join
                     positions = [pos for pos in record["all_positions"] if pos is not None]
-                    position_text = ", ".join(positions[:3]) if positions else None  # Limit to 3 positions
-                    if len(positions) > 3:
-                        position_text += f" + {len(positions) - 3} more"
                     
                     results["persons"]["data"].append({
                         "type": "person",
@@ -122,7 +118,6 @@ def search_historical_data(payload: SearchRequest):
                         "image": record["image"],
                         "context": {
                             "positions": positions,  # Array of all positions
-                            "primary_position": position_text,  # Formatted text
                             "country": record["country"]
                         }
                     })
