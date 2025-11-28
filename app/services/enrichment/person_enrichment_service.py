@@ -14,7 +14,7 @@ def preview_person_enrichment(name):
     Preview enrichment FOR A SINGLE QID (use qids[0] only).
     Does NOT write to the DB.
     """
-    # Step A: find person in internal Neo4j
+    # Step A: find person in internal Neo4j testtt
     persons = repo.get_all_persons(limit=10000)
     match = None
     for p in persons:
