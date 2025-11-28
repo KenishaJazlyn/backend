@@ -9,6 +9,7 @@ from app.routers.feature.explore_cypher import router as explore_router
 from app.routers.feature.infobox import router as infobox_router
 from app.routers.enrichment.country_enrichment import router as country_enrichment_router
 
+from app.routers.feature.searching import router as searching_router
 app = FastAPI(title="KG Enrichment Service - Person")
 
 app.add_middleware(
@@ -25,3 +26,4 @@ app.include_router(event_enrichment_router, prefix="/enrich/events")
 app.include_router(country_enrichment_router, prefix="/enrich/countries")
 app.include_router(explore_router)
 app.include_router(infobox_router)
+app.include_router(searching_router)
