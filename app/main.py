@@ -14,7 +14,7 @@ app = FastAPI(title="KG Enrichment Service - Person")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "https://fe-histopedia.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
