@@ -63,7 +63,7 @@ def search_historical_data(payload: SearchRequest):
             
             filter_conditions, base_params = _build_filter_conditions()
 
-            # PERSON SEARCH - Fixed with proper aggregation for both positions and countries
+            # PERSON SEARCH - Using elementId() instead of id()
             if payload.search_type in ["person", "all"]:
 
                 person_cypher = f"""
@@ -89,12 +89,12 @@ def search_historical_data(payload: SearchRequest):
                      collect(DISTINCT coalesce(pos.label, pos.name)) as all_positions,
                      collect(DISTINCT country.country) as all_countries
                 RETURN 
-                    id(p) AS id,
+                    elementId(p) AS element_id,
                     p.full_name AS name,
                     p.description AS description,
                     p.image_url AS image,
                     all_positions,
-                    all_countries[0] AS country  // Take first country only
+                    all_countries[0] AS country
                 ORDER BY p.full_name
                 SKIP $offset
                 LIMIT $limit
@@ -113,13 +113,13 @@ def search_historical_data(payload: SearchRequest):
                     
                     results["persons"]["data"].append({
                         "type": "person",
-                        "id": record["id"],
+                        "element_id": record["element_id"],
                         "name": record["name"],
                         "description": record["description"],
                         "image": record["image"],
                         "context": {
-                            "positions": positions,  # Array of all positions
-                            "country": record["country"]  # Single country (first one)
+                            "positions": positions,
+                            "country": record["country"]
                         }
                     })
             
@@ -128,7 +128,7 @@ def search_historical_data(payload: SearchRequest):
 
             event_limit = payload.limit - person_found
 
-            # EVENT SEARCH - Fixed with same approach
+            # EVENT SEARCH - Using elementId() instead of id()
             if (event_limit > 0) and (payload.search_type in ["event", "all"]):
                 
                 event_cypher = f"""
@@ -151,12 +151,12 @@ def search_historical_data(payload: SearchRequest):
                 WITH e,
                      collect(DISTINCT country.country) as all_countries
                 RETURN 
-                    id(e) AS id,
+                    elementId(e) AS element_id,
                     e.name AS name,
                     e.description AS description, 
                     e.image_url AS image,
                     e.impact AS impact,
-                    all_countries[0] AS country  // Take first country only
+                    all_countries[0] AS country
                 ORDER BY e.name
                 SKIP $offset
                 LIMIT $limit
@@ -173,7 +173,7 @@ def search_historical_data(payload: SearchRequest):
                 for record in event_results:
                     results["events"]["data"].append({
                         "type": "event", 
-                        "id": record["id"],
+                        "element_id": record["element_id"],
                         "name": record["name"],
                         "description": record["description"],
                         "image": record["image"], 
@@ -246,14 +246,14 @@ def get_search_suggestions(q: str = Query(..., min_length=2)):
             suggestions_cypher = """
             MATCH (p:Person)
             WHERE p.full_name IS NOT NULL AND toLower(p.full_name) STARTS WITH $query
-            RETURN id(p) AS id, p.full_name AS suggestion, "person" AS type
+            RETURN elementId(p) AS element_id, p.full_name AS suggestion, "person" AS type
             LIMIT 5
             
             UNION
             
             MATCH (e:Event)
             WHERE e.name IS NOT NULL AND toLower(e.name) STARTS WITH $query
-            RETURN id(e) AS id, e.name AS suggestion, "event" AS type
+            RETURN elementId(e) AS element_id, e.name AS suggestion, "event" AS type
             LIMIT 5
             """
             
@@ -262,7 +262,7 @@ def get_search_suggestions(q: str = Query(..., min_length=2)):
             suggestions = []
             for record in results:
                 suggestions.append({
-                    "id": record["id"],
+                    "element_id": record["element_id"],
                     "text": record["suggestion"],
                     "type": record["type"] 
                 })
