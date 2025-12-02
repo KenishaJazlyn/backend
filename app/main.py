@@ -8,8 +8,9 @@ from app.routers.health import router as health_router
 from app.routers.feature.explore_cypher import router as explore_router
 from app.routers.feature.infobox import router as infobox_router
 from app.routers.enrichment.country_enrichment import router as country_enrichment_router
-
 from app.routers.feature.searching import router as searching_router
+from app.routers.feature.vector_search import router as vector_search_router
+
 app = FastAPI(title="KG Enrichment Service - Person")
 
 app.add_middleware(
@@ -27,3 +28,4 @@ app.include_router(country_enrichment_router, prefix="/enrich/countries")
 app.include_router(explore_router)
 app.include_router(infobox_router)
 app.include_router(searching_router)
+app.include_router(vector_search_router, prefix="/vector")

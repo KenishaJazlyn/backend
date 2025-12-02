@@ -4,3 +4,6 @@ requests
 neo4j
 python-dotenv
 httpx
+sentence-transformers
+numpy
+torch
