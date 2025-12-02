@@ -10,7 +10,7 @@ FORBIDDEN = [
     "CREATE", "MERGE", "DELETE", "SET", "REMOVE", "DROP", "CALL", "LOAD CSV", "UNWIND"
 ]
 
-EXCLUDED_PROPERTIES = {"embedding", "embedding_updated", "searchable_text"}
+EXCLUDED_PROPERTIES = {"embedding", "embedding_updated", "searchable_text", "point_in_time", "article_id", "event_id", "primary_category_qid"}
 
 
 def filter_properties(obj):
@@ -45,6 +45,31 @@ def serialize_neo4j_types(obj):
     else:
         return obj
 
+def merge_date_attributes(properties: dict) -> dict:
+    """
+    Merge 'year', 'month', and 'date' attributes into a single 'date' string
+    in the format 'Day Month Year', keeping only the merged 'date' property.
+    """
+    new_properties = properties.copy()
+    
+    day_str = str(new_properties.get("date", "")).strip()
+    month_str = str(new_properties.get("month", "")).strip()
+    year_str = str(new_properties.get("year", "")).strip()
+
+    date_parts = [part for part in [day_str, month_str, year_str] if part]
+
+    if date_parts:
+        merged_date_str = " ".join(date_parts)
+        
+        new_properties["date"] = merged_date_str
+
+        if "month" in new_properties:
+            del new_properties["month"]
+        if "year" in new_properties:
+            del new_properties["year"]
+            
+    return new_properties
+
 
 def get_related_nodes(session, element_id):
     """
@@ -74,7 +99,7 @@ def get_related_nodes(session, element_id):
                     "element_id": item["element_id"],
                     "relationship": item["relationship"],
                     "labels": item["labels"],
-                    "properties": serialize_neo4j_types(dict(item["node"]))
+                    "properties": serialize_neo4j_types(filter_properties(dict(item["node"]))) # Added filter_properties here
                 })
     
     return related_nodes
@@ -100,6 +125,8 @@ def infobox_id(element_id: str):
             node = record["n"]
             properties = serialize_neo4j_types(filter_properties(dict(node)))
             
+            properties = merge_date_attributes(properties)
+            
             # Get related nodes
             related_nodes = get_related_nodes(session, element_id)
             
@@ -113,4 +140,4 @@ def infobox_id(element_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Cypher error: {e}")
+        raise HTTPException(status_code=400, detail=f"Error processing request: {e}")
