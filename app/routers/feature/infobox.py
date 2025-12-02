@@ -10,6 +10,20 @@ FORBIDDEN = [
     "CREATE", "MERGE", "DELETE", "SET", "REMOVE", "DROP", "CALL", "LOAD CSV", "UNWIND"
 ]
 
+EXCLUDED_PROPERTIES = {"embedding", "embedding_updated", "searchable_text"}
+
+
+def filter_properties(obj):
+    """
+    Remove excluded properties from the object.
+    """
+    if isinstance(obj, dict):
+        return {k: filter_properties(v) for k, v in obj.items() if k not in EXCLUDED_PROPERTIES}
+    elif isinstance(obj, (list, tuple)):
+        return [filter_properties(item) for item in obj]
+    else:
+        return obj
+
 def serialize_neo4j_types(obj):
     """
     Convert Neo4j types to JSON-serializable Python types.
@@ -84,7 +98,7 @@ def infobox_id(element_id: str):
             if not record:
                 raise HTTPException(status_code=404, detail=f"Node with element_id {element_id} not found")
             node = record["n"]
-            properties = serialize_neo4j_types(dict(node))
+            properties = serialize_neo4j_types(filter_properties(dict(node)))
             
             # Get related nodes
             related_nodes = get_related_nodes(session, element_id)
