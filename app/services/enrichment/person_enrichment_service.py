@@ -14,14 +14,8 @@ def preview_person_enrichment(name):
     Preview enrichment FOR A SINGLE QID (use qids[0] only).
     Does NOT write to the DB.
     """
-    # Step A: find person in internal Neo4j testtt
-    persons = repo.get_all_persons(limit=10000)
-    match = None
-    for p in persons:
-        internal_name = p.get('full_name')
-        if internal_name and internal_name.lower() == name.lower():
-            match = p
-            break
+    # Step A: find person in internal Neo4j - EFFICIENT single query
+    match = repo.find_person_by_full_name(name)
 
     if not match:
         return {"status":"not_found", "name": name}
@@ -74,15 +68,8 @@ def preview_person_enrichment(name):
     return {"status":"ok", "name": name, "person_id": person_id, "candidate": candidate}
 
 def enrich_person_by_name(name):
-    # Step A: find person in internal Neo4j
-    persons = repo.get_all_persons(limit=10000)
-    match = None
-
-    for p in persons:
-        internal_name = p.get("full_name")
-        if internal_name and internal_name.lower() == name.lower():
-            match = p
-            break
+    # Step A: find person in internal Neo4j - EFFICIENT single query
+    match = repo.find_person_by_full_name(name)
 
     if not match:
         return {"status": "not_found", "name": name}
@@ -93,14 +80,16 @@ def enrich_person_by_name(name):
     if person_id is None:
         return {"status": "error", "name": name, "message": "article_id is None"}
 
-    print(f"Found internal person: {internal_name} with article_id {person_id}")
+    print(f"Found internal person: {name} with article_id {person_id}")
 
     # Step B: find QID in Wikidata
     qids = find_qid_by_label(name, limit=5)
     if not qids:
+        print(f"❌ QID NOT FOUND for: {name}")
         return {"status": "qid_not_found", "name": name}
 
     qid = qids[0]
+    print(f"✅ QID FOUND: {name} → {qid}")
     basic = get_person_basic_by_qid(qid)
     # Step C: fetch enrichment for that single QID
     positions = get_person_positions(qid)

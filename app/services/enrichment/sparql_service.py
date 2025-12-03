@@ -1,29 +1,39 @@
 import requests
 from urllib.parse import urlencode
 import time
+import random
 
 WIKIDATA_ENDPOINT = "https://query.wikidata.org/sparql"
 HEADERS = {
-    "User-Agent": "KG-Enrichment/1.0 (student project)",
+    "User-Agent": "KG-Enrichment/1.0 (student project; educational use)",
     "Accept": "application/sparql-results+json"
 }
 
-def run_sparql(endpoint, query, timeout=30, retries=3, backoff=1.0):
+def run_sparql(endpoint, query, timeout=30, retries=5, backoff=2.0):
+    """Run SPARQL query with exponential backoff and jitter"""
     params = {"query": query}
     url = endpoint + "?" + urlencode(params)
+    
     for attempt in range(retries):
         try:
             resp = requests.get(url, headers=HEADERS, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.HTTPError as e:
-            if resp.status_code in (429, 503):
-                time.sleep(backoff * (2 ** attempt))
+            if resp.status_code in (429, 503, 500):
+                # Rate limited or server error - wait longer
+                wait_time = backoff * (2 ** attempt) + random.uniform(0, 1)
+                print(f"⏳ Wikidata rate limit (attempt {attempt+1}/{retries}), waiting {wait_time:.1f}s...")
+                time.sleep(wait_time)
                 continue
             raise
-        except requests.exceptions.RequestException:
-            time.sleep(backoff * (2 ** attempt))
-    raise RuntimeError("SPARQL query failed after retries")
+        except requests.exceptions.RequestException as e:
+            wait_time = backoff * (2 ** attempt) + random.uniform(0, 1)
+            print(f"⚠️ Request error (attempt {attempt+1}/{retries}): {e}, waiting {wait_time:.1f}s...")
+            time.sleep(wait_time)
+    
+    print(f"❌ SPARQL query failed after {retries} retries")
+    return None  # Return None instead of raising, so enrichment can continue
 
 def find_qid_by_label(name, limit=5):
     q = '''
@@ -32,6 +42,8 @@ def find_qid_by_label(name, limit=5):
     } LIMIT %d
     ''' % (name.replace('"','\\"'), limit)
     data = run_sparql(WIKIDATA_ENDPOINT, q)
+    if data is None:
+        return []  # Return empty if SPARQL failed
     results = data.get('results', {}).get('bindings', [])
     qids = [r['person']['value'].split('/')[-1] for r in results]
     return qids

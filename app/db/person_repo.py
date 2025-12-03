@@ -37,6 +37,18 @@ class PersonRepo:
             row = res.single()
             return row["p"] if row else None
 
+    def find_person_by_full_name(self, full_name: str):
+        """Find person by full_name (case-insensitive) - EFFICIENT single query"""
+        with self.driver.session(database=self.db) as session:
+            res = session.run("""
+                MATCH (p:Person)
+                WHERE toLower(p.full_name) = toLower($full_name)
+                RETURN p.name AS name, p.article_id AS article_id, p.full_name AS full_name
+                LIMIT 1
+            """, {"full_name": full_name})
+            row = res.single()
+            return dict(row) if row else None
+
     def upsert_person_enrichment(
         self,
         person_id,
