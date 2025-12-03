@@ -21,7 +21,7 @@ def get_embedding_model():
     """Load embedding model (singleton pattern)"""
     global _model
     if _model is None:
-        model_name = os.getenv("EMBEDDING_MODEL", DEFAULT_MODEL)
+        model_name = "BAAI/bge-base-en-v1.5"
         device = "cpu"
         
         print(f"🔄 Loading embedding model: {model_name}")

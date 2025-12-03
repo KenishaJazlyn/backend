@@ -1,9 +1,10 @@
-fastapi
-uvicorn
-requests
-neo4j
-python-dotenv
-httpx
-sentence-transformers
-numpy
-torch
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sentence-transformers==2.2.2
+requests==2.31.0
+neo4j==5.14.1
+python-dotenv==1.0.0
+httpx==0.25.1
+numpy==1.26.2
